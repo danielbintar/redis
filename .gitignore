@@ -1,0 +1,25 @@
+# Build output
+redis-server
+tests/test_store
+tests/test_resp
+
+# Coverage
+*.profraw
+*.profdata
+coverage.txt
+coverage-html/
+
+# Object files
+*.o
+*.a
+*.so
+*.dylib
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
