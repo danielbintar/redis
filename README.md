@@ -77,7 +77,8 @@ redis-cli -p 6379 GET name
 ### Networking
 - **Thread pool / I/O multiplexing** — the current thread-per-client model spawns an unbounded number of detached threads; replace with a bounded thread pool or `kqueue`/`epoll`-based event loop.
 - **Connection limit** — cap the maximum number of simultaneous clients to prevent resource exhaustion.
-- **Client read timeout** — a slow or hung client currently holds its thread forever; add a `SO_RCVTIMEO` or idle timeout.
+- ~~**Keepalive tuning**~~ — implemented: `SO_KEEPALIVE` enabled with 60s idle, 10s interval, 3 probes (~90s detection). `SO_RCVTIMEO` intentionally avoided — it would disconnect legitimate idle clients held by connection pools.
+- **Misbehaving client timeout** — a client that connects but never sends a command holds a thread forever and won't be caught by keepalive (the client OS still responds to probes); consider a short initial-command deadline using a per-socket timer.
 - **IPv6 support** — socket currently uses `AF_INET` only; extend to dual-stack `AF_INET6`.
 - **Pipelining** — batch multiple commands in one TCP write and process them without waiting for individual responses.
 - **Pub/Sub** — `PUBLISH`, `SUBSCRIBE`, `UNSUBSCRIBE` for real-time messaging channels.

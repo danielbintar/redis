@@ -48,6 +48,23 @@ void Server::handleClient(int fd) {
     int flag = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 
+    // detect dead connections (crashed client, dropped network)
+    int keepalive = 1;
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
+    // send first probe after 60s idle, then every 10s, give up after 3 misses
+    // (~90s total to detect a dead connection vs OS default of ~2 hours)
+#ifdef __APPLE__
+    int keepidle = 60;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &keepidle, sizeof(keepidle));
+#else
+    int keepidle = 60;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+#endif
+    int keepintvl = 10;
+    int keepcnt   = 3;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+
     std::string            buf;
     std::array<char, 4096> tmp{};
 
