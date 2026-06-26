@@ -33,7 +33,7 @@ redis-cli -p 6379 GET name
 `DEL` `EXISTS` `EXPIRE` `PEXPIRE` `TTL` `PTTL` `PERSIST` `KEYS` `DBSIZE` `FLUSHDB` `FLUSHALL`
 
 ### Server
-`PING` `ECHO` `QUIT`
+`PING` `ECHO` `QUIT` `SELECT` `CONFIG GET` `CONFIG SET`
 
 ---
 
@@ -85,8 +85,10 @@ redis-cli -p 6379 GET name
 - **RESP3** — newer protocol version with richer types (maps, sets, doubles, booleans).
 
 ### Memory management
-- **`maxmemory` limit** — cap total memory use and reject writes when the limit is reached.
-- **Eviction policies** — `allkeys-lru`, `allkeys-lfu`, `volatile-lru`, `volatile-ttl`, `allkeys-random` to automatically free memory under pressure.
+- ~~**`maxmemory` limit**~~ — implemented: the store tracks an approximate `usedMemory` estimate and, under the `noeviction` policy, rejects writes with an OOM error once the limit is reached. Configure via `--maxmemory <bytes>` at startup or `CONFIG SET maxmemory <bytes>` at runtime (0 = unlimited).
+- **Eviction policies** — currently only `noeviction` (reject writes when full). Add `allkeys-lru`, `allkeys-lfu`, `volatile-lru`, `volatile-ttl`, `allkeys-random` to automatically free memory under pressure instead of rejecting writes.
+- **Accurate memory accounting** — the current estimate is `key + value size + a fixed per-entry overhead constant`; it ignores hash-table load factor, capacity slack, and allocator rounding. A real implementation would hook the allocator or use `malloc_size`.
+- **`maxmemory` size suffixes** — accept `100mb`, `1gb`, etc. instead of raw byte counts.
 
 ### Configuration
 - **Config file** — load settings from a `redis.conf`-style file at startup (`--config path`).

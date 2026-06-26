@@ -1,23 +1,49 @@
 #include "store.h"
 
-#include <array>
+// Rough per-entry bookkeeping overhead (hash node, pointers, std::string headers).
+// Not exact — just enough that maxmemory accounting tracks real growth.
+static constexpr int64_t kEntryOverhead = 64;
+
+static int64_t entryBytes(const std::string& key, const std::string& val) {
+    return static_cast<int64_t>(key.size() + val.size()) + kEntryOverhead;
+}
+
+void Store::eraseEntry(Map::iterator it) {
+    usedMemory_ -= entryBytes(it->first, it->second.value);
+    data_.erase(it);
+}
 
 Store::Entry* Store::getAlive(const std::string& key) {
     auto it = data_.find(key);
     if (it == data_.end()) return nullptr;
     if (it->second.expiry && Clock::now() >= *it->second.expiry) {
-        data_.erase(it);
+        eraseEntry(it);
         return nullptr;
     }
     return &it->second;
 }
 
-void Store::set(const std::string& key, const std::string& val, int64_t ttl_ms) {
+bool Store::set(const std::string& key, const std::string& val, int64_t ttl_ms) {
     std::scoped_lock lk(mu_);
-    Entry            e;
-    e.value = val;
-    if (ttl_ms > 0) e.expiry = Clock::now() + std::chrono::milliseconds(ttl_ms);
-    data_[key] = std::move(e);
+
+    // noeviction: once at/over the limit, reject all writes
+    if (maxMemory_ > 0 && usedMemory_ >= maxMemory_) return false;
+
+    std::optional<Clock::time_point> expiry;
+    if (ttl_ms > 0) expiry = Clock::now() + std::chrono::milliseconds(ttl_ms);
+
+    auto it = data_.find(key);
+    if (it == data_.end()) {
+        usedMemory_ += entryBytes(key, val);
+        data_.emplace(key, Entry{.value = val, .expiry = expiry});
+    } else {
+        // overwrite: adjust by the value-size delta (key size is unchanged)
+        usedMemory_ += static_cast<int64_t>(val.size()) -
+                       static_cast<int64_t>(it->second.value.size());
+        it->second.value  = val;
+        it->second.expiry = expiry;  // SET without EX/PX clears any existing TTL
+    }
+    return true;
 }
 
 std::optional<std::string> Store::get(const std::string& key) {
@@ -30,7 +56,13 @@ std::optional<std::string> Store::get(const std::string& key) {
 int64_t Store::del(const std::vector<std::string>& keys) {
     std::scoped_lock lk(mu_);
     int64_t          count = 0;
-    for (const auto& k : keys) count += static_cast<int64_t>(data_.erase(k));
+    for (const auto& k : keys) {
+        auto it = data_.find(k);
+        if (it != data_.end()) {
+            eraseEntry(it);
+            ++count;
+        }
+    }
     return count;
 }
 
@@ -99,4 +131,20 @@ int64_t Store::dbsize() {
 void Store::flushall() {
     std::scoped_lock lk(mu_);
     data_.clear();
+    usedMemory_ = 0;
+}
+
+void Store::setMaxMemory(int64_t bytes) {
+    std::scoped_lock lk(mu_);
+    maxMemory_ = bytes;
+}
+
+int64_t Store::maxMemory() const {
+    std::scoped_lock lk(mu_);
+    return maxMemory_;
+}
+
+int64_t Store::usedMemory() const {
+    std::scoped_lock lk(mu_);
+    return usedMemory_;
 }

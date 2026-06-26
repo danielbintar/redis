@@ -12,8 +12,9 @@ static void onSignal(int) {
 }
 
 int main(int argc, char* argv[]) {
-    std::string host = "127.0.0.1";
-    int         port = 6379;
+    std::string host      = "127.0.0.1";
+    int         port      = 6379;
+    int64_t     maxMemory = 0;  // 0 = unlimited
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -21,10 +22,12 @@ int main(int argc, char* argv[]) {
             port = std::atoi(argv[++i]);
         else if (arg == "--host" && i + 1 < argc)
             host = argv[++i];
+        else if (arg == "--maxmemory" && i + 1 < argc)
+            maxMemory = std::atoll(argv[++i]);
     }
 
     try {
-        Server server(host, port);
+        Server server(host, port, maxMemory);
         g_server = &server;
 
         std::signal(SIGINT, onSignal);

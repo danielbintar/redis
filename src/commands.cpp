@@ -25,6 +25,33 @@ std::string handleCommand(Store& store, const std::vector<std::string>& args) {
     if (cmd == "QUIT") return resp::ok();
     if (cmd == "SELECT") return resp::ok();
 
+    // ── Config ───────────────────────────────────────────────────────────────
+    if (cmd == "CONFIG") {
+        if (args.size() < 3) return resp::error("wrong number of arguments for 'config'");
+        const auto sub   = toUpper(args[1]);
+        const auto param = toUpper(args[2]);
+        if (sub == "GET") {
+            if (param == "MAXMEMORY")
+                return resp::array({"maxmemory", std::to_string(store.maxMemory())});
+            if (param == "USED-MEMORY")  // not a real Redis config key; handy for testing
+                return resp::array({"used-memory", std::to_string(store.usedMemory())});
+            return resp::array({});  // unknown param → empty result, like Redis
+        }
+        if (sub == "SET") {
+            if (args.size() != 4) return resp::error("wrong number of arguments for 'config|set'");
+            if (param == "MAXMEMORY") {
+                try {
+                    store.setMaxMemory(std::stoll(args[3]));
+                } catch (const std::exception&) {
+                    return resp::error("argument couldn't be parsed into an integer");
+                }
+                return resp::ok();
+            }
+            return resp::error("unknown config parameter '" + args[2] + "'");
+        }
+        return resp::error("unknown CONFIG subcommand '" + args[1] + "'");
+    }
+
     // ── Strings ──────────────────────────────────────────────────────────────
     if (cmd == "SET") {
         if (args.size() < 3) return resp::error("wrong number of arguments for 'set'");
@@ -40,7 +67,8 @@ std::string handleCommand(Store& store, const std::vector<std::string>& args) {
                 }
             }
         }
-        store.set(args[1], args[2], ttl_ms);
+        if (!store.set(args[1], args[2], ttl_ms))
+            return resp::error("OOM command not allowed when used memory > 'maxmemory'.");
         return resp::ok();
     }
     if (cmd == "GET") {

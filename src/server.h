@@ -14,7 +14,7 @@ struct Client {
 
 class Server {
 public:
-    Server(std::string host, int port);
+    Server(std::string host, int port, int64_t maxMemory = 0);
     ~Server();
 
     void run();  // blocks; single-threaded event loop

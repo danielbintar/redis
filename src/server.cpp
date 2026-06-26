@@ -48,7 +48,9 @@ static void applyClientOpts(int fd) {
 
 // ── lifecycle ─────────────────────────────────────────────────────────────────
 
-Server::Server(std::string host, int port) : host_(std::move(host)), port_(port) {
+Server::Server(std::string host, int port, int64_t maxMemory)
+    : host_(std::move(host)), port_(port) {
+    store_.setMaxMemory(maxMemory);
     setupSocket();
 #ifdef __APPLE__
     eventFd_ = kqueue();
