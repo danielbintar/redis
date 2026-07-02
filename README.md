@@ -121,10 +121,8 @@ redis-cli -p 6379 GET name
 ## Code quality backlog
 
 ### `server.cpp`
-- **`goto disconnect`** — `handleClient` uses two `goto` jumps; replace with a helper function or a `bool should_close` flag to keep control flow structured.
-- **Unsynchronised `std::cout`** — the accept loop and every client thread write to `std::cout` concurrently without a lock, producing interleaved output under load; wrap in a simple locked logger.
-- **Ignored `setsockopt` return values** — calls for `SO_REUSEADDR` and `TCP_NODELAY` silently discard errors; at minimum log a warning on failure.
-- **Detached threads outlive the store** — `std::thread(...).detach()` means client threads keep running after `stop()` returns and the `Store` is destroyed; track threads and join them on shutdown, or use a thread pool with a proper lifetime.
+- **Ignored `setsockopt` return values** — the `SO_REUSEADDR`, `SO_KEEPALIVE`, and keepalive-tuning calls silently discard errors; at minimum log a warning on failure.
+- **Unbounded read/write buffers** — a client that sends a huge incomplete command (or never reads our responses) makes `rbuf`/`wbuf` grow without limit; cap them and disconnect abusive clients.
 
 ### `resp.cpp`
 - **`int` for array count and bulk length** — `parseArray` stores the wire-format count/length in a plain `int`; use `int64_t` and validate against `INT_MAX` to avoid overflow on crafted input.
@@ -132,16 +130,16 @@ redis-cli -p 6379 GET name
 - **Inline parser ignores quoted tokens** — `parseInline` splits on whitespace via `istringstream`, so `SET key "hello world"` inline would tokenize into four parts instead of three.
 
 ### `store.cpp`
-- **Duplicated expiry check in `keys()` and `dbsize()`** — both methods manually inline the `!v.expiry || Clock::now() < *v.expiry` guard instead of reusing `getAlive()`; if the eviction logic ever changes, these will silently diverge.
-- **`del()` counts already-expired keys as deleted** — it erases directly from `data_` without going through `getAlive()`, so deleting an expired-but-not-yet-evicted key returns 1 instead of 0, which doesn't match Redis semantics.
+- ~~**Duplicated expiry check in `keys()` and `dbsize()`**~~ — fixed: both now route through a shared `isExpired()` helper, alongside `getAlive()` and `del()`.
+- ~~**`del()` counts already-expired keys as deleted**~~ — fixed: `del()` checks `isExpired()` before counting, so an expired-but-not-yet-evicted key is reclaimed but reported as 0 (matches Redis).
 
 ### `commands.cpp`
-- **`catch (...)` is too broad** — the `SET`, `EXPIRE`, and `PEXPIRE` handlers catch all exceptions; narrow to `std::invalid_argument` and `std::out_of_range` so genuine bugs aren't silently swallowed.
+- ~~**`catch (...)` is too broad**~~ — fixed: the `SET`, `EXPIRE`, `PEXPIRE`, and `CONFIG SET` handlers now catch `std::logic_error` (the common base of `std::invalid_argument`/`std::out_of_range`), so `std::bad_alloc` and other genuine faults propagate.
 - **Zero test coverage** — `commands.cpp` has no unit tests at all; add a `tests/test_commands.cpp` that exercises the dispatch layer directly (no network needed — just call `handleCommand` with a `Store`).
 
 ### `main.cpp`
-- **`std::atoi` gives no error signal** — `atoi("abc")` silently returns 0, which makes the server bind to port 0 (a random OS-assigned port); replace with `std::stoi` inside a try/catch and exit with a clear message on invalid input.
-- **`std::cout` inside signal handler** — `std::cout` is not async-signal-safe; use `write(STDOUT_FILENO, ...)` or set a `std::atomic<bool>` flag and let `run()` print the message.
+- ~~**`std::atoi` gives no error signal**~~ — fixed: CLI integers are parsed via `std::stoll` inside `parseIntArg()`, which prints a clear message and exits on invalid input; unknown flags are also rejected.
+- ~~**`std::cout` inside signal handler**~~ — fixed: `onSignal` now has C linkage and uses only `write()` plus a pointer check — no `std::cout`, no heap, no locking.
 
 ### Tests
 - **Time-dependent sleep tests** — `key_evicted_after_ttl` and `keys_excludes_expired` use `sleep_for(100ms)` with a 50 ms TTL; on a loaded CI machine the sleep may not be long enough, causing spurious failures. Use a wider margin or a poll loop with a timeout.

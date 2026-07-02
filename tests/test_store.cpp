@@ -35,6 +35,23 @@ TEST(del_missing_key_returns_zero) {
     CHECK_EQ(s.del({"missing"}), 0);
 }
 
+TEST(del_expired_key_returns_zero) {
+    Store s;
+    s.set("k", "v", 50);  // 50ms TTL
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // key is expired but not yet lazily evicted; DEL must report 0, not 1
+    CHECK_EQ(s.del({"k"}), 0);
+    CHECK_EQ(s.usedMemory(), 0);  // but it should still be reclaimed
+}
+
+TEST(del_mixed_live_and_expired) {
+    Store s;
+    s.set("live", "1");
+    s.set("dead", "2", 50);  // 50ms TTL
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK_EQ(s.del({"live", "dead"}), 1);  // only "live" counts
+}
+
 TEST(exists) {
     Store s;
     s.set("x", "1");
@@ -224,6 +241,8 @@ int main() {
     RUN(set_overwrites);
     RUN(del_existing_keys);
     RUN(del_missing_key_returns_zero);
+    RUN(del_expired_key_returns_zero);
+    RUN(del_mixed_live_and_expired);
     RUN(exists);
     RUN(ttl_no_expiry);
     RUN(ttl_missing_key);

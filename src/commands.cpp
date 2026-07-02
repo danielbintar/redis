@@ -1,6 +1,7 @@
 #include "commands.h"
 
 #include <cctype>
+#include <stdexcept>
 
 #include "resp.h"
 
@@ -42,7 +43,7 @@ std::string handleCommand(Store& store, const std::vector<std::string>& args) {
             if (param == "MAXMEMORY") {
                 try {
                     store.setMaxMemory(std::stoll(args[3]));
-                } catch (const std::exception&) {
+                } catch (const std::logic_error&) {
                     return resp::error("argument couldn't be parsed into an integer");
                 }
                 return resp::ok();
@@ -62,7 +63,7 @@ std::string handleCommand(Store& store, const std::vector<std::string>& args) {
                 try {
                     int64_t v = std::stoll(args[++i]);
                     ttl_ms    = (opt == "EX") ? v * 1000 : v;
-                } catch (...) {
+                } catch (const std::logic_error&) {
                     return resp::error("value is not an integer or out of range");
                 }
             }
@@ -90,7 +91,7 @@ std::string handleCommand(Store& store, const std::vector<std::string>& args) {
         if (args.size() != 3) return resp::error("wrong number of arguments for 'expire'");
         try {
             return resp::integer(store.expire(args[1], std::stoll(args[2]) * 1000) ? 1 : 0);
-        } catch (...) {
+        } catch (const std::logic_error&) {
             return resp::error("value is not an integer or out of range");
         }
     }
@@ -98,7 +99,7 @@ std::string handleCommand(Store& store, const std::vector<std::string>& args) {
         if (args.size() != 3) return resp::error("wrong number of arguments for 'pexpire'");
         try {
             return resp::integer(store.expire(args[1], std::stoll(args[2])) ? 1 : 0);
-        } catch (...) {
+        } catch (const std::logic_error&) {
             return resp::error("value is not an integer or out of range");
         }
     }

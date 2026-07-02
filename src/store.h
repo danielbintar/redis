@@ -44,6 +44,7 @@ private:
     int64_t            maxMemory_{0};   // 0 = unlimited
     int64_t            usedMemory_{0};  // running estimate, bytes
 
-    Entry* getAlive(const std::string& key);
-    void   eraseEntry(Map::iterator it);
+    Entry*      getAlive(const std::string& key);
+    void        eraseEntry(Map::iterator it);
+    static bool isExpired(const Entry& e);
 };

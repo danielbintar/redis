@@ -13,10 +13,14 @@ void Store::eraseEntry(Map::iterator it) {
     data_.erase(it);
 }
 
+bool Store::isExpired(const Entry& e) {
+    return e.expiry && Clock::now() >= *e.expiry;
+}
+
 Store::Entry* Store::getAlive(const std::string& key) {
     auto it = data_.find(key);
     if (it == data_.end()) return nullptr;
-    if (it->second.expiry && Clock::now() >= *it->second.expiry) {
+    if (isExpired(it->second)) {
         eraseEntry(it);
         return nullptr;
     }
@@ -58,10 +62,12 @@ int64_t Store::del(const std::vector<std::string>& keys) {
     int64_t          count = 0;
     for (const auto& k : keys) {
         auto it = data_.find(k);
-        if (it != data_.end()) {
-            eraseEntry(it);
-            ++count;
-        }
+        if (it == data_.end()) continue;
+        // An already-expired-but-not-yet-evicted key is not "deleted" — it was
+        // already logically gone. Evict it but don't count it (matches Redis).
+        bool expired = isExpired(it->second);
+        eraseEntry(it);
+        if (!expired) ++count;
     }
     return count;
 }
@@ -114,7 +120,7 @@ std::vector<std::string> Store::keys() {
     std::scoped_lock         lk(mu_);
     std::vector<std::string> result;
     for (auto& [k, v] : data_) {
-        if (!v.expiry || Clock::now() < *v.expiry) result.push_back(k);
+        if (!isExpired(v)) result.push_back(k);
     }
     return result;
 }
@@ -123,7 +129,7 @@ int64_t Store::dbsize() {
     std::scoped_lock lk(mu_);
     int64_t          n = 0;
     for (auto& [k, v] : data_) {
-        if (!v.expiry || Clock::now() < *v.expiry) ++n;
+        if (!isExpired(v)) ++n;
     }
     return n;
 }
