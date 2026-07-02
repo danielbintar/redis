@@ -10,6 +10,15 @@ static std::string toUpper(std::string s) {
     return s;
 }
 
+static std::string toLower(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+static const char* policyName(Store::EvictionPolicy p) {
+    return p == Store::EvictionPolicy::AllKeysLru ? "allkeys-lru" : "noeviction";
+}
+
 std::string handleCommand(Store& store, const std::vector<std::string>& args) {
     if (args.empty()) return resp::error("empty command");
 
@@ -34,6 +43,8 @@ std::string handleCommand(Store& store, const std::vector<std::string>& args) {
         if (sub == "GET") {
             if (param == "MAXMEMORY")
                 return resp::array({"maxmemory", std::to_string(store.maxMemory())});
+            if (param == "MAXMEMORY-POLICY")
+                return resp::array({"maxmemory-policy", policyName(store.evictionPolicy())});
             if (param == "USED-MEMORY")  // not a real Redis config key; handy for testing
                 return resp::array({"used-memory", std::to_string(store.usedMemory())});
             return resp::array({});  // unknown param → empty result, like Redis
@@ -45,6 +56,17 @@ std::string handleCommand(Store& store, const std::vector<std::string>& args) {
                     store.setMaxMemory(std::stoll(args[3]));
                 } catch (const std::logic_error&) {
                     return resp::error("argument couldn't be parsed into an integer");
+                }
+                return resp::ok();
+            }
+            if (param == "MAXMEMORY-POLICY") {
+                const auto val = toLower(args[3]);
+                if (val == "noeviction") {
+                    store.setEvictionPolicy(Store::EvictionPolicy::NoEviction);
+                } else if (val == "allkeys-lru") {
+                    store.setEvictionPolicy(Store::EvictionPolicy::AllKeysLru);
+                } else {
+                    return resp::error("argument(s) must be a valid maxmemory policy");
                 }
                 return resp::ok();
             }

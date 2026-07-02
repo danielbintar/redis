@@ -35,6 +35,8 @@ redis-cli -p 6379 GET name
 ### Server
 `PING` `ECHO` `QUIT` `SELECT` `CONFIG GET` `CONFIG SET`
 
+Supported `CONFIG` parameters: `maxmemory`, `maxmemory-policy` (`noeviction` \| `allkeys-lru`).
+
 ---
 
 ## Backlog
@@ -86,7 +88,9 @@ redis-cli -p 6379 GET name
 
 ### Memory management
 - ~~**`maxmemory` limit**~~ — implemented: the store tracks an approximate `usedMemory` estimate and, under the `noeviction` policy, rejects writes with an OOM error once the limit is reached. Configure via `--maxmemory <bytes>` at startup or `CONFIG SET maxmemory <bytes>` at runtime (0 = unlimited).
-- **Eviction policies** — currently only `noeviction` (reject writes when full). Add `allkeys-lru`, `allkeys-lfu`, `volatile-lru`, `volatile-ttl`, `allkeys-random` to automatically free memory under pressure instead of rejecting writes.
+- ~~**Eviction policies**~~ — `noeviction` (default) and `allkeys-lru` implemented. LRU is *approximated* like real Redis: each entry carries a `lastAccess` timestamp (refreshed on read/write), and eviction samples 5 random keys and drops the oldest, repeating until back under the limit. Switch with `CONFIG SET maxmemory-policy allkeys-lru`.
+- **More eviction policies** — add `allkeys-lfu`, `allkeys-random`, and the `volatile-*` family (which only consider keys with a TTL). LFU needs a probabilistic access-frequency counter per entry.
+- **O(1) random sampling** — LRU victim sampling advances an `unordered_map` iterator to a random offset, which is O(n); Redis uses a custom dict with O(1) random-member access. Maintain a sampling-friendly index (e.g. a key vector or Redis-style dict) to avoid the scan.
 - **Accurate memory accounting** — the current estimate is `key + value size + a fixed per-entry overhead constant`; it ignores hash-table load factor, capacity slack, and allocator rounding. A real implementation would hook the allocator or use `malloc_size`.
 - **`maxmemory` size suffixes** — accept `100mb`, `1gb`, etc. instead of raw byte counts.
 

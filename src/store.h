@@ -9,7 +9,10 @@
 
 class Store {
 public:
+    enum class EvictionPolicy : std::uint8_t { NoEviction, AllKeysLru };
+
     // Returns false if rejected under the noeviction policy (out of memory).
+    // Under allkeys-lru the store first evicts to make room, so it never rejects.
     bool                       set(const std::string& key, const std::string& val,
                                    int64_t ttl_ms = 0);
     std::optional<std::string> get(const std::string& key);
@@ -24,10 +27,12 @@ public:
     int64_t                  dbsize();
     void                     flushall();
 
-    // Memory management (noeviction policy)
-    void    setMaxMemory(int64_t bytes);  // 0 = unlimited
-    int64_t maxMemory() const;
-    int64_t usedMemory() const;
+    // Memory management
+    void           setMaxMemory(int64_t bytes);  // 0 = unlimited
+    int64_t        maxMemory() const;
+    int64_t        usedMemory() const;
+    void           setEvictionPolicy(EvictionPolicy p);
+    EvictionPolicy evictionPolicy() const;
 
 private:
     using Clock = std::chrono::steady_clock;
@@ -35,6 +40,7 @@ private:
     struct Entry {
         std::string                      value;
         std::optional<Clock::time_point> expiry;
+        Clock::time_point                lastAccess;  // for approximated LRU
     };
 
     using Map = std::unordered_map<std::string, Entry>;
@@ -43,8 +49,11 @@ private:
     mutable std::mutex mu_;
     int64_t            maxMemory_{0};   // 0 = unlimited
     int64_t            usedMemory_{0};  // running estimate, bytes
+    EvictionPolicy     policy_{EvictionPolicy::NoEviction};
 
-    Entry*      getAlive(const std::string& key);
-    void        eraseEntry(Map::iterator it);
-    static bool isExpired(const Entry& e);
+    Entry*        getAlive(const std::string& key);
+    void          eraseEntry(Map::iterator it);
+    static bool   isExpired(const Entry& e);
+    void          evictToFit();      // caller must hold mu_
+    Map::iterator sampleVictim();    // caller must hold mu_; approximated LRU
 };

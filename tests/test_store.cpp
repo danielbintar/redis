@@ -234,6 +234,46 @@ TEST(maxmemory_first_write_allowed_then_rejected) {
     CHECK_EQ(s.set("b", "2"), false);  // now over limit → rejected
 }
 
+// ── eviction: allkeys-lru ───────────────────────────────────────────────────
+
+TEST(eviction_policy_defaults_to_noeviction) {
+    Store s;
+    CHECK(s.evictionPolicy() == Store::EvictionPolicy::NoEviction);
+}
+
+TEST(allkeys_lru_never_rejects_and_stays_bounded) {
+    Store s;
+    s.setEvictionPolicy(Store::EvictionPolicy::AllKeysLru);
+    s.setMaxMemory(200);  // room for ~2-3 tiny entries
+    for (int i = 0; i < 50; ++i) {
+        CHECK_EQ(s.set("k" + std::to_string(i), "v"), true);  // never rejected
+    }
+    // eviction keeps us near the limit rather than growing unbounded
+    CHECK(s.usedMemory() <= 300);
+}
+
+TEST(allkeys_lru_evicts_least_recently_used) {
+    using namespace std::chrono_literals;
+    Store s;
+    s.setEvictionPolicy(Store::EvictionPolicy::AllKeysLru);
+    s.set("a", "1");
+    std::this_thread::sleep_for(1ms);
+    s.set("b", "2");
+    std::this_thread::sleep_for(1ms);
+    s.set("c", "3");
+    std::this_thread::sleep_for(1ms);
+    s.get("a");  // touch "a" → now "b" is the least recently used
+
+    // pin the limit at current usage so the next write must evict exactly one
+    s.setMaxMemory(s.usedMemory());
+    s.set("d", "4");
+
+    CHECK_EQ(s.get("b").has_value(), false);  // LRU victim evicted
+    CHECK_EQ(s.get("a").has_value(), true);   // recently accessed → survives
+    CHECK_EQ(s.get("c").has_value(), true);
+    CHECK_EQ(s.get("d").has_value(), true);   // the new key
+}
+
 int main() {
     std::cout << "store:\n";
     RUN(set_and_get);
@@ -268,5 +308,8 @@ int main() {
     RUN(maxmemory_rejects_write_when_over_limit);
     RUN(maxmemory_allows_write_when_under_limit);
     RUN(maxmemory_first_write_allowed_then_rejected);
+    RUN(eviction_policy_defaults_to_noeviction);
+    RUN(allkeys_lru_never_rejects_and_stays_bounded);
+    RUN(allkeys_lru_evicts_least_recently_used);
     TEST_RESULTS();
 }
