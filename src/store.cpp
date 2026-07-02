@@ -1,6 +1,5 @@
 #include "store.h"
 
-#include <iterator>
 #include <random>
 
 // Rough per-entry bookkeeping overhead (hash node, pointers, std::string headers).
@@ -16,6 +15,12 @@ static int64_t entryBytes(const std::string& key, const std::string& val) {
 
 void Store::eraseEntry(Map::iterator it) {
     usedMemory_ -= entryBytes(it->first, it->second.value);
+    // Swap-and-pop from keyIndex_ so it stays dense: move the last pointer into
+    // the victim's slot, fix that moved node's recorded slot, then shrink.
+    const std::size_t slot        = it->second.slot;
+    keyIndex_[slot]               = keyIndex_.back();
+    keyIndex_[slot]->second.slot  = slot;
+    keyIndex_.pop_back();
     data_.erase(it);
 }
 
@@ -48,7 +53,9 @@ bool Store::set(const std::string& key, const std::string& val, int64_t ttl_ms) 
     auto it = data_.find(key);
     if (it == data_.end()) {
         usedMemory_ += entryBytes(key, val);
-        data_.emplace(key, Entry{.value = val, .expiry = expiry, .lastAccess = now});
+        Entry e{.value = val, .expiry = expiry, .lastAccess = now, .slot = keyIndex_.size()};
+        auto  res = data_.emplace(key, std::move(e));
+        keyIndex_.push_back(&*res.first);
     } else {
         // overwrite: adjust by the value-size delta (key size is unchanged)
         usedMemory_ += static_cast<int64_t>(val.size()) -
@@ -148,6 +155,7 @@ int64_t Store::dbsize() {
 void Store::flushall() {
     std::scoped_lock lk(mu_);
     data_.clear();
+    keyIndex_.clear();
     usedMemory_ = 0;
 }
 
@@ -186,22 +194,26 @@ void Store::evictToFit() {
 }
 
 Store::Map::iterator Store::sampleVictim() {
-    // Approximated LRU: examine kMaxMemorySamples entries starting at a random
-    // offset and return the one with the oldest lastAccess. Real Redis keeps a
-    // dict with O(1) random-member access; std::unordered_map has none, so the
-    // random-offset advance is O(n) — see the backlog for the refinement.
-    static thread_local std::mt19937 rng{std::random_device{}()};
-    const size_t                     offset =
-        std::uniform_int_distribution<size_t>(0, data_.size() - 1)(rng);
+    // Approximated LRU: pick the entry with the oldest lastAccess from a small
+    // set of candidates. keyIndex_ gives O(1) random access, so this is O(1)
+    // regardless of keyspace size (no scan, no iterator advance).
+    Map::value_type*  victim = nullptr;
+    const std::size_t n      = keyIndex_.size();
 
-    auto it = data_.begin();
-    std::advance(it, offset);
-
-    auto victim = it;
-    for (int i = 0; i < kMaxMemorySamples; ++i) {
-        if (it == data_.end()) it = data_.begin();  // wrap around
-        if (it->second.lastAccess < victim->second.lastAccess) victim = it;
-        ++it;
+    if (n <= static_cast<std::size_t>(kMaxMemorySamples)) {
+        // Few keys — just inspect them all; it's already cheap and exact.
+        for (auto* node : keyIndex_) {
+            if (victim == nullptr || node->second.lastAccess < victim->second.lastAccess)
+                victim = node;
+        }
+    } else {
+        static thread_local std::mt19937     rng{std::random_device{}()};
+        std::uniform_int_distribution<size_t> dist(0, n - 1);
+        victim = keyIndex_[dist(rng)];
+        for (int i = 1; i < kMaxMemorySamples; ++i) {
+            Map::value_type* cand = keyIndex_[dist(rng)];
+            if (cand->second.lastAccess < victim->second.lastAccess) victim = cand;
+        }
     }
-    return victim;
+    return data_.find(victim->first);
 }

@@ -41,12 +41,17 @@ private:
         std::string                      value;
         std::optional<Clock::time_point> expiry;
         Clock::time_point                lastAccess;  // for approximated LRU
+        std::size_t                      slot{0};     // index into keyIndex_
     };
 
     using Map = std::unordered_map<std::string, Entry>;
 
-    Map                data_;
-    mutable std::mutex mu_;
+    Map data_;
+    // Dense array of pointers to live map nodes, enabling O(1) random sampling
+    // for LRU eviction. Kept in sync with data_ via swap-and-pop in eraseEntry().
+    // (Pointers to unordered_map elements stay valid across rehash; iterators do not.)
+    std::vector<Map::value_type*> keyIndex_;
+    mutable std::mutex            mu_;
     int64_t            maxMemory_{0};   // 0 = unlimited
     int64_t            usedMemory_{0};  // running estimate, bytes
     EvictionPolicy     policy_{EvictionPolicy::NoEviction};

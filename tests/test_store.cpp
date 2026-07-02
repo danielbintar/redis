@@ -274,6 +274,23 @@ TEST(allkeys_lru_evicts_least_recently_used) {
     CHECK_EQ(s.get("d").has_value(), true);   // the new key
 }
 
+TEST(key_index_survives_interleaved_del_and_evict) {
+    // Stresses the swap-and-pop bookkeeping behind O(1) sampling: many inserts,
+    // deletions from the middle, then eviction — everything must stay consistent.
+    Store s;
+    s.setEvictionPolicy(Store::EvictionPolicy::AllKeysLru);
+    for (int i = 0; i < 100; ++i) CHECK_EQ(s.set("k" + std::to_string(i), "v"), true);
+    // delete every even key
+    for (int i = 0; i < 100; i += 2) CHECK_EQ(s.del({"k" + std::to_string(i)}), 1);
+    CHECK_EQ(s.dbsize(), 50);
+    // all odd keys must still be present and correct
+    for (int i = 1; i < 100; i += 2) CHECK_EQ(s.get("k" + std::to_string(i)).value_or(""), "v");
+    // now force heavy eviction; must never crash or leak
+    s.setMaxMemory(150);  // room for ~2 entries
+    for (int i = 0; i < 100; ++i) CHECK_EQ(s.set("n" + std::to_string(i), "v"), true);
+    CHECK(s.usedMemory() <= 250);
+}
+
 int main() {
     std::cout << "store:\n";
     RUN(set_and_get);
@@ -311,5 +328,6 @@ int main() {
     RUN(eviction_policy_defaults_to_noeviction);
     RUN(allkeys_lru_never_rejects_and_stays_bounded);
     RUN(allkeys_lru_evicts_least_recently_used);
+    RUN(key_index_survives_interleaved_del_and_evict);
     TEST_RESULTS();
 }
